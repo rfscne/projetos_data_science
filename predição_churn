@@ -162,3 +162,11 @@ model.predict_proba(X_test)
 # [[0.93, 0.07]] , uma linha , duas colunas ()
 # Para obter somente a segunda coluna, 1a coluna = probabilidade de ficar, 2a coluna=probabilidade de churn
 # Este consumidor tem 93% de ficar. 
+
+#Testar os threshold para ver qual o melhor
+from sklearn.metrics import accuracy_score
+thresholds = np.linspace(0,1,11)
+for t in thresholds:
+    churn = y_pred >=t
+    acc = accuracy_score(y_val, churn)
+    print('%0.2f %0.3f' % (t, acc))
