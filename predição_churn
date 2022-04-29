@@ -1,0 +1,164 @@
+import pandas as pd
+import numpy as np 
+import seaborn as sns
+from matplotlib import pyplot as plt
+%matplotlib inline 
+
+df = pd.read_csv(r'd:\dataset\telco\telco_dataset.csv')
+len(df)
+#df.columns
+#df.head(10).T
+#df.dtypes
+df.TotalCharges = pd.to_numeric(df.TotalCharges, errors='coerce')
+df.isnull().sum() #ver a quantidade de dados faltantes, total charge tem 11
+df.TotalCharges = df.TotalCharges.fillna(0) #preencher dados faltantes com zero
+
+df.columns = df.columns.str.lower().str.replace(' ','_')
+string_columns = list(df.dtypes[df.dtypes == 'object'].index) #pega somente os tipos objetos
+for col in string_columns: 
+    df[col] = df[col].str.lower().str.replace(' ', '_')
+df.churn = (df.churn == 'yes').astype(int) #converte churn para int
+print(df.churn)
+
+from sklearn.model_selection import train_test_split
+df_train_full, df_test = train_test_split(df, test_size=0.2, random_state=1)
+
+#dividir o df_train_full em 2 datasets (train e validação)
+df_train, df_val = train_test_split(df_train_full, test_size=0.33, random_state=11)
+y_train = df_train.churn.values
+y_val = df_val.churn.values
+
+del df_train['churn']
+del df_val['churn']
+
+df_train_full.churn.value_counts() #calcula quantidade de não churn e churn
+global_mean=df_train_full.churn.mean() #também calcula o percentual de churn: 0,27
+round(global_mean, 3)
+
+categorical = ['gender','seniorcitizen','partner','dependents',
+                'phoneservice', 'multiplelines', 'internetservice',
+                'onlinesecurity', 'onlinebackup', 'deviceprotection',
+                'techsupport', 'streamingtv','streamingmovies',
+                'contract', 'paperlessbilling','paymentmethod']
+numerical = ['tenure', 'monthlycharges', 'totalcharges']
+
+df_train_full[categorical].nunique() #ver quantos valores únicos cada atributo possui
+
+female_mean = df_train_full[df_train_full.gender =='female'].churn.mean()
+male_mean = df_train_full[df_train_full.gender == 'male'].churn.mean()
+
+print('taxa churn female:', female_mean)
+print('taxa churn male:', male_mean) #diferença de turn entre homens e mulheres é muito pequena
+#indicando que gender não influencia no churn. 
+risk = female_mean/global_mean
+print('risco female:', risk)
+
+#Analisar outro atributo, partner
+partner_yes = df_train_full[df_train_full.partner=='yes'].churn.mean()
+partner_no = df_train_full[df_train_full.partner =='no'].churn.mean()
+global_mean=df_train_full.churn.mean()
+print('partner_yes:', partner_yes) #taxa de turn bem diferentes entre yes e no
+print('partner_no:', partner_no) # bom para predizer churn. 
+
+#verificar o risco de cada uma das variáveis
+
+from IPython.display import display 
+for col in categorical: 
+    df_group = df_train_full.groupby(by=col).churn.agg(['mean'])
+    df_group['diff'] = df_group['mean'] - global_mean
+    df_group['rate'] = df_group['mean'] / global_mean 
+    display(df_group)
+
+    #Dependência mútua entre duas variáveis (1 variável mais a alvo)
+#MI = mutual information
+#Valores altos de dependência mútua, significa maior o grau de dependência
+# Quanto maior a dependência, mais útil será para a predição. 
+
+from sklearn.metrics import mutual_info_score
+def calculate_mi(series): 
+    return mutual_info_score(series, df_train_full.churn)
+
+#aplica a função calculate_mi para cada coluna de df_train_full[categorical]
+#series representa cada coluna ou seja categorical
+df_mi = df_train_full[categorical].apply(calculate_mi)
+#ordena o resultado. 
+df_mi = df_mi.sort_values(ascending=False).to_frame(name='MI')
+df_mi
+#contract, onlinesecurity e techsupport são as características mais importantes
+
+# Informação mútua não se aplica a variáveis numéricas, então utilizar correlação. 
+
+correlacao = df_train_full[numerical].corrwith(df_train_full.churn)
+print('correlacao:', correlacao)
+
+#Aplicação do one-hot encoding para transformar variáveis categóricas em numéricas. 
+
+#converter o dataframe em uma lista de dicionarios
+
+train_dict = df_train[categorical+numerical].to_dict(orient='records')
+print('dic',train_dict[0])
+from sklearn.feature_extraction import DictVectorizer
+dv = DictVectorizer(sparse = False) #sparse = False = cria um array NumPy
+dv.fit(train_dict)
+
+#Converter o dicionário em uma matrix
+X_train = dv.transform(train_dict)
+X_train[0]
+
+#Para ver o nome das colunas
+dv.get_feature_names()
+
+#Aplicação do modelo de regressão logistico (utiliza função sigmoide)
+#Treinamento com regressão logística 
+from sklearn.linear_model import LogisticRegression
+model = LogisticRegression(solver='liblinear', random_state=1)
+model.fit(X_train, y_train)
+
+#Aplicação do modelo aos dados de validação
+#Aplicação do one-hot encoding ao dataset de validação 
+val_dict = df_val[categorical + numerical].to_dict(orient='records')
+X_val = dv.transform(val_dict)
+y_pred = model.predict_proba(X_val)
+
+#resultado tabelado em probabilidade de no_churn|churn
+#Para selecionar somente uma das colunas
+y_pred = model.predict_proba(X_val)[:,1] # : = todas as linhas, 1 =segunda coluna
+y_pred[:]
+print('y_pred:', y_pred)
+
+churn = y_pred >=0.5
+churn[:5]
+#Percentual de predição correta: 80%
+#Compara a saída de y_val com as predições que está na lista churn
+print('accuracy:', (y_val == churn).mean()) #churn=y_pred >=0.5
+
+#Usando o modelo
+customer = {
+    'customerid': '8879-zkjof',
+    'gender': 'female',
+    'seniorcitizen': 0,
+    'partner': 'no',
+    'dependents': 'no',
+    'tenure': 41,
+    'phoneservice': 'yes',
+    'multiplelines': 'no',
+    'internetservice': 'dsl',
+    'onlinesecurity': 'yes',
+    'onlinebackup': 'no',
+    'deviceprotection': 'yes',
+    'techsupport': 'yes',
+    'streamingtv': 'yes',
+    'streamingmovies': 'yes',
+    'contract': 'one_year',
+    'paperlessbilling': 'yes',
+    'paymentmethod': 'bank_transfer_(automatic)',
+    'monthlycharges': 79.85,
+    'totalcharges': 3320.75,
+}
+      
+X_test = dv.transform([customer])
+model.predict_proba(X_test)
+
+# [[0.93, 0.07]] , uma linha , duas colunas ()
+# Para obter somente a segunda coluna, 1a coluna = probabilidade de ficar, 2a coluna=probabilidade de churn
+# Este consumidor tem 93% de ficar. 
